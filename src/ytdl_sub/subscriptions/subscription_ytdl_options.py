@@ -80,6 +80,15 @@ class SubscriptionYTDLOptions:
         }
 
     @property
+    def _sync_with_source(self) -> bool:
+        if not self._preset.output_options.sync_with_source:
+            return False
+
+        return self._overrides.apply_formatter(
+            self._preset.output_options.sync_with_source, expected_type=bool
+        )
+
+    @property
     def _output_options(self) -> Dict:
         ytdl_options = {}
 
@@ -87,6 +96,7 @@ class SubscriptionYTDLOptions:
             ytdl_options["download_archive"] = (
                 self._enhanced_download_archive.working_ytdl_file_path
             )
+
         if self._preset.output_options.keep_max_files:
             keep_max_files = self._overrides.apply_formatter(
                 self._preset.output_options.keep_max_files, expected_type=int
@@ -96,6 +106,18 @@ class SubscriptionYTDLOptions:
                 ytdl_options["max_downloads"] = max(keep_max_files, 2)
 
         return ytdl_options
+
+    @property
+    def _sync_with_source_options(self) -> Dict:
+        if not self._sync_with_source:
+            return {}
+
+        # stopping at the first already downloaded entry would hide the rest of the source,
+        # which sync_with_source would then interpret as deleted entries
+        logger.info(
+            "sync_with_source is enabled, disabling break_on_existing to fetch the entire source"
+        )
+        return {"break_on_existing": False}
 
     def _plugin_ytdl_options(self, plugin: Type[PluginT]) -> Dict:
         if plugin_obj := self._get_plugin(plugin):
@@ -166,15 +188,24 @@ class SubscriptionYTDLOptions:
         YTDLOptionsBuilder
             Builder with values set for fetching metadata (.info.json) only
         """
+        output_options = self._output_options
+        if self._sync_with_source:
+            # yt-dlp does not write an info.json for entries already in the download archive,
+            # which would make every previously downloaded entry look like it was removed
+            # from the source. Entries already downloaded are skipped by the downloader
+            # itself instead.
+            output_options.pop("download_archive", None)
+
         return YTDLOptionsBuilder().add(
             self._global_options,
-            self._output_options,
+            output_options,
             self._plugin_match_filters,
             self._plugin_ytdl_options(ThrottleProtectionPlugin),
             self._plugin_ytdl_options(FormatPlugin),
             self._plugin_ytdl_options(AudioExtractPlugin),  # will override format
             self._user_ytdl_options,  # user ytdl options...
             self._info_json_only_options,  # then info_json_only options
+            self._sync_with_source_options,  # then sync_with_source overrides
         )
 
     def download_builder(self) -> YTDLOptionsBuilder:

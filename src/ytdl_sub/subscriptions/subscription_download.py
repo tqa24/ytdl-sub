@@ -144,6 +144,11 @@ class SubscriptionDownload(BaseSubscription, ABC):
         # If output options maintains stale file deletion, perform the delete here prior to saving
         # the download archive
         if self.maintain_download_archive:
+            if self.output_options.sync_with_source and self.overrides.apply_formatter(
+                self.output_options.sync_with_source, expected_type=bool
+            ):
+                self.download_archive.remove_entries_not_in_source()
+
             date_range_to_keep = to_date_range(
                 before=self.output_options.keep_files_before,
                 after=self.output_options.keep_files_after,
